@@ -241,7 +241,7 @@ def td_new(sdl_1_denoised, sdr_1_denoised, sdl_2_denoised, sdr_2_denoised, td_te
     adapt_th_max = td_params["adapt_th_max"]
 
     t0 = time.time()
-    td_orin = local_var(td_orin, var_fil_ksize, 1, var_th)
+    td_orin = local_var(td_orin, var_fil_ksize, 0.5, var_th)
     t1 = time.time()
     tdl_orin = torch.empty_like(td_orin, device=td_orin.device)
 
