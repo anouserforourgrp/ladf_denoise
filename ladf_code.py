@@ -241,7 +241,7 @@ def td_new(sdl_1_denoised, sdr_1_denoised, sdl_2_denoised, sdr_2_denoised, td_te
     adapt_th_max = td_params["adapt_th_max"]
 
     t0 = time.time()
-    td_orin = local_var(td_orin, var_fil_ksize, 0.5, var_th)
+    td_orin = local_var(td_orin, var_fil_ksize, 1, var_th)
     t1 = time.time()
     tdl_orin = torch.empty_like(td_orin, device=td_orin.device)
 
@@ -249,7 +249,8 @@ def td_new(sdl_1_denoised, sdr_1_denoised, sdl_2_denoised, sdr_2_denoised, td_te
     zero_tensor_1[0:79, ...] = td_orin[2::2, :].clone()
 
     tdl_orin[::2, :] = td_orin[1::2, :] - td_orin[::2, :]
-    tdl_orin[1::2, :] = zero_tensor_1 - td_orin[1::2, :]
+    tdl_orin[1::2, :] = -(zero_tensor_1 - td_orin[1::2, :])
+
     tdr_orin = torch.empty_like(td_orin, device=td_orin.device)
 
     orin = torch.empty_like(td_orin, device=td_orin.device)
@@ -261,7 +262,7 @@ def td_new(sdl_1_denoised, sdr_1_denoised, sdl_2_denoised, sdr_2_denoised, td_te
     zero_tensor_2[0:79, ...] = orin[2::2, :].clone()
 
     tdr_orin[::2, :] = orin[1::2, :] - orin[::2, :]
-    tdr_orin[1::2, :] = zero_tensor_2 - orin[1::2, :]
+    tdr_orin[1::2, :] = -(zero_tensor_2 - orin[1::2, :])
 
     t2 = time.time()
 
@@ -283,9 +284,12 @@ def td_new(sdl_1_denoised, sdr_1_denoised, sdl_2_denoised, sdr_2_denoised, td_te
     cmp_sign = torch.sign(cmp_tensor)
     mask = (ref_sign == cmp_sign)
     result_tensor = torch.where(mask, cmp_tensor, torch.zeros_like(cmp_tensor, device=td_orin.device))
+
+
     polarity_flag = torch.zeros_like(td_orin, dtype=torch.bool , device=td_orin.device)
-    polarity_flag[::2, :] = ((td_orin[1::2, :]) == torch.sign(td_orin[::2, :]))
+    polarity_flag[::2, :] = (torch.sign(td_orin[1::2, :]) == torch.sign(td_orin[::2, :]))
     polarity_flag[1::2, :] = torch.sign(zero_tensor_1) == torch.sign(td_orin[1::2, :])
+
     final_l = polarity_flag.float() * tdl_orin * polarities_same_and_zero.float() + result_tensor + tdl_orin * polarities_same_and_nonzero.float()
 
     t3 = time.time()
@@ -296,14 +300,16 @@ def td_new(sdl_1_denoised, sdr_1_denoised, sdl_2_denoised, sdr_2_denoised, td_te
     polarities_diff = torch.sign(tensor1) != torch.sign(tensor2)
     polarities_same_and_zero = (torch.sign(tensor1) == torch.sign(tensor2)) & (tensor1 == 0) & (tensor2 == 0)
     polarities_same_and_nonzero = (torch.sign(tensor1) == torch.sign(tensor2)) & (tensor1 != 0) & (tensor2 != 0)
+
     ref_tensor = (tensor2 - tensor1) * polarities_diff.float()
     cmp_tensor = tdr_orin * polarities_diff.float()
     ref_sign = torch.sign(ref_tensor)
     cmp_sign = torch.sign(cmp_tensor)
     mask = (ref_sign == cmp_sign)
     result_tensor = torch.where(mask, cmp_tensor, torch.zeros_like(cmp_tensor))
+
     polarity_flag = torch.zeros_like(orin, dtype=torch.bool, device=td_orin.device)
-    polarity_flag[::2, :] = ((orin[1::2, :]) == torch.sign(orin[::2, :]))
+    polarity_flag[::2, :] = (torch.sign(orin[1::2, :]) == torch.sign(orin[::2, :]))
     polarity_flag[1::2, :] = torch.sign(zero_tensor_2) == torch.sign(orin[1::2, :])
     final_r = polarity_flag.float() * tdr_orin * polarities_same_and_zero.float() + result_tensor + tdr_orin * polarities_same_and_nonzero.float()
 
@@ -321,16 +327,19 @@ def td_new(sdl_1_denoised, sdr_1_denoised, sdl_2_denoised, sdr_2_denoised, td_te
 
     tsd_lu_to_td[::2, :] = tsd_lu_orin
     tsd_lu_to_td[1::2, :] = tsd_lu_orin
+
     tsd_ll_to_td[1::2, :] = tsd_ll_orin
     tsd_ll_to_td[2::2, :] = tsd_ll_orin[0:79, ...]
+
     tsd_ru_to_td[::2, 1:] = tsd_ru_orin[..., 0:159]
     tsd_ru_to_td[1::2, :] = tsd_ru_orin
+
     tsd_rl_to_td[2::2, 1:] = tsd_rl_orin[0:79, 0:159]
     tsd_rl_to_td[1::2, :] = tsd_rl_orin
     t5 = time.time()
 
-    rusult = ((torch.abs(tsd_lu_to_td) > 0).float() + (torch.abs(tsd_ll_to_td) > 0).float() + (
-                torch.abs(tsd_ru_to_td) > 0).float() + (torch.abs(tsd_rl_to_td) > 0).float()) * td_orin
+    rusult = (((torch.abs(tsd_lu_to_td) > 0).float() + (torch.abs(tsd_ll_to_td) > 0).float() + (
+                torch.abs(tsd_ru_to_td) > 0).float() + (torch.abs(tsd_rl_to_td) > 0).float())>0).float() * td_orin
 
     rusult = td_adaptive_filter(rusult, min_thr=adapt_th_min, max_thr=adapt_th_max, kernel_size=3)
     t6 = time.time()
